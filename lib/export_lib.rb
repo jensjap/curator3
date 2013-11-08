@@ -145,9 +145,24 @@ class Exporter  #{{{1
     when :DesignDetail
       _process_section_details({ :study_id => study_id, :section => section })
     when :DiagnosticTest
-      #!!!
+      lof_diagnostic_tests = _get_lof_diagnostic_tests(study_id)
+      lof_suggested_diagnostic_tests = _get_lof_suggested_diagnostic_tests
+
+      _process_diagnostic_tests({ :study_id => study_id,
+                                  :section => section,
+                                  :diagnostic_tests => lof_diagnostic_tests,
+                                  :suggested_diagnostic_tests => lof_suggested_diagnostic_tests })
     when :DiagnosticTestDetail
       #!!!
+      section_option = _get_section_option("diagnostic_test_detail")
+      if section_option.by_diagnostic_test
+        lof_diagnostic_tests = _get_lof_diagnostic_tests(study_id)
+        lof_diagnostic_tests.each do |dt|
+          _process_diagnostic_test_details({ :study_id => study_id, :section => section, :diagnostic_test_id => dt.id })
+        end
+      else
+        _process_diagnostic_test_details({ :study_id => study_id, :section => section, :diagnostic_test_id => 0 })
+      end
     when :Arm
       _process_arms({ :study_id => study_id, :section => section })
     when :ArmDetail
@@ -168,7 +183,13 @@ class Exporter  #{{{1
         _process_section_details({ :study_id => study_id, :section => section, :arm_id => id })
       end
     when :Outcome
-      #!!!
+      lof_outcomes              = _get_lof_outcomes(study_id)
+      lof_suggested_outcomes    = _get_lof_suggested_outcomes
+
+      _process_outcomes({ :study_id           => study_id,
+                          :section            => section,
+                          :outcomes           => lof_outcomes,
+                          :suggested_outcomes => lof_suggested_outcomes })
     when :OutcomeDetail
       section_option = _get_section_option("outcome_detail")
       if section_option.by_outcome
@@ -208,6 +229,184 @@ class Exporter  #{{{1
     else
       @lof_errors << "Failure to sort section #{section} for study ID #{study_id} extraction form ID #{@ef_id}"
     end
+  end
+
+  def _process_diagnostic_tests(params)  #{{{2
+    test_type_lookup = { 1 => 'Index Text', 2 => 'Reference Test' }
+
+    study_id = params[:study_id]
+    section = params[:section]
+    diagnostic_tests = params[:diagnostic_tests]
+    suggested_diagnostic_tests = params[:suggested_diagnostic_tests]
+
+    diagnostic_test_titles = diagnostic_tests.collect { |test| test.title }
+    suggested_diagnostic_test_titles = suggested_diagnostic_tests.collect { |suggested_test| suggested_test.title }
+
+    diagnostic_tests.each do |dt|
+      dt_title       = dt.title
+      dt_type        = test_type_lookup[dt.test_type]
+      dt_description = dt.description
+      dt_notes       = dt.notes
+      selected       = "Y"
+      if suggested_diagnostic_test_titles.include? dt.title
+        is_suggested = "Y"
+      else
+        is_suggested = ""
+      end
+
+      lof_diagnostic_test_thresholds = _get_lof_diagnostic_test_thresholds(dt.id)
+      lof_diagnostic_test_thresholds.each do |dtt|
+        dt_threshold = dtt.threshold
+        data = [dt_title,
+                dt_type,
+                dt_description,
+                dt_notes,
+                selected,
+                is_suggested,
+                dt_threshold
+               ]
+        _write_to_csv(study_id, section, data)
+      end
+    end
+
+    suggested_diagnostic_tests.each do |sdt|
+      unless diagnostic_test_titles.include? sdt.title
+        dt_title = sdt.title
+        dt_type = test_type_lookup[sdt.test_type]
+        dt_description = sdt.description
+        dt_notes = sdt.notes
+        selected = ""
+        is_suggested = "Y"
+        dt_threshold = ""
+
+        data = [dt_title,
+                dt_type,
+                dt_description,
+                dt_notes,
+                selected,
+                is_suggested,
+                dt_threshold
+               ]
+        _write_to_csv(study_id, section, data)
+      end
+    end
+  end
+
+  def _get_lof_diagnostic_test_thresholds(diagnostic_test_id)  #{{{2
+    DiagnosticTestThreshold.find(:all, :conditions => { :diagnostic_test_id => diagnostic_test_id })
+  end
+
+  def _get_lof_diagnostic_tests(study_id)  #{{{2
+    DiagnosticTest.find(:all, :conditions => { :study_id => study_id,
+                                               :extraction_form_id => @ef_id })
+  end
+
+  def _get_lof_suggested_diagnostic_tests  #{{{2
+    ExtractionFormDiagnosticTest.find(:all, :conditions => { :extraction_form_id => @ef_id })
+  end
+
+  def _process_outcomes(params)  #{{{2
+    study_id = params[:study_id]
+    section = params[:section]
+    outcomes = params[:outcomes]
+    suggested_outcomes = params[:suggested_outcomes]
+
+    outcome_titles = outcomes.collect { |outcome| outcome.title }
+    suggested_outcome_titles = suggested_outcomes.collect { |suggested_outcome| suggested_outcome.title }
+
+    outcomes.each do |outcome|
+      outcome_id = outcome.id
+      outcome_title = outcome.title
+      outcome_description = outcome.description
+      outcome_type = outcome.outcome_type
+      outcome_selected = "Y"
+      population_selected = "Y"
+      timepoint_selected = "Y"
+
+      if suggested_outcome_titles.include? outcome_title
+        outcome_suggested_by_lead = "Y"
+      else
+        outcome_suggested_by_lead = ""
+      end
+
+      populations = _get_outcome_populations(outcome.id)
+      timepoints = _get_outcome_timepoints(outcome.id)
+
+      populations.each do |p|
+        population_id = p.id
+        population_title = p.title
+        population_description = p.description
+
+        timepoints.each do |t|
+          timepoint_id = t.id
+          timepoint_title = t.number.strip
+          timepoint_unit = t.time_unit.strip
+
+          data = [outcome_title,
+                  outcome_description,
+                  outcome_type,
+                  outcome_selected,
+                  outcome_suggested_by_lead,
+                  population_title,
+                  population_selected,
+                  population_description,
+                  timepoint_title,
+                  timepoint_unit,
+                  timepoint_selected,
+                  outcome_id,
+                  population_id,
+                  timepoint_id]
+          _write_to_csv(study_id, section, data)
+        end
+      end
+    end
+
+    suggested_outcomes.each do |so|
+      unless outcome_titles.include? so.title
+        outcome_title = so.title
+        outcome_selected = ""
+        outcome_suggested_by_lead = "Y"
+        outcome_description = so.note
+        outcome_type = so.outcome_type
+        population_title = "All Participants"
+        population_selected = ""
+        population_description = "All participants involved in the study (Default)"
+        timepoint_title = ""
+        timepoint_unit = ""
+        timepoint_selected = ""
+        outcome_id = ""
+        population_id = ""
+        timepoint_id = ""
+        
+        data = [outcome_title,
+                outcome_description,
+                outcome_type,
+                outcome_selected,
+                outcome_suggested_by_lead,
+                population_title,
+                population_selected,
+                population_description,
+                timepoint_title,
+                timepoint_unit,
+                timepoint_selected,
+                outcome_id,
+                population_id,
+                timepoint_id]
+        _write_to_csv(study_id, section, data)
+      end
+    end
+  end
+
+  def _get_lof_suggested_outcomes  #{{{2
+    ExtractionFormOutcomeName.find(:all, :conditions => { :extraction_form_id => @ef_id })
+  end
+
+  def _get_outcome_populations(outcome_id)  #{{{2
+    OutcomeSubgroup.find(:all, :conditions => { :outcome_id => outcome_id })
+  end
+
+  def _get_outcome_timepoints(outcome_id)  #{{{2
+    OutcomeTimepoint.find(:all, :conditions => { :outcome_id => outcome_id })
   end
 
   def _process_quality_rating(params)  #{{{2
@@ -417,6 +616,24 @@ class Exporter  #{{{1
     _write_to_csv(study_id, section, data)
   end
 
+  def _process_diagnostic_test_details(params)  #{{{2
+    study_id = params[:study_id]
+    section = params[:section]
+    diagnostic_test_id = params[:diagnostic_test_id]
+
+    lof_diagnostic_test_details = _get_lof_diagnostic_test_details(section)
+    lof_diagnostic_test_details.each do |dtd|
+      _diagnostic_test_detail_info({ :study_id => study_id,
+                                     :diagnostic_test_id => diagnostic_test_id,
+                                     :section => section,
+                                     :diagnostic_test_detail => dtd })
+    end
+  end
+
+  def _get_lof_diagnostic_test_details(section)  #{{{2
+    "#{section.to_s}".constantize.find(:all, :conditions => { :extraction_form_id => @ef_id })
+  end
+
   def _process_section_details(params)  #{{{2
     study_id = params[:study_id]
     section = params[:section]
@@ -487,6 +704,12 @@ class Exporter  #{{{1
     common_info_study_section = Hash.new
     pp = PrimaryPublication.find(:first, :conditions => { :study_id => study_id })
 
+    common_info_study_section[:project_id] = @p_id
+    common_info_study_section[:project_title] = Project.find(@p_id).title
+    common_info_study_section[:ef_title] = ExtractionForm.find(@ef_id).title
+    common_info_study_section[:section] = section.to_s
+    common_info_study_section[:study_id] = study_id
+
     if pp.blank?
       @lof_errors << "Unable to find PrimaryPublication data for study id #{study_id}"
     else
@@ -497,10 +720,6 @@ class Exporter  #{{{1
         ppn = PrimaryPublicationNumber.new(:number => "", :number_type => "")
       end
 
-      common_info_study_section[:project_id] = @p_id
-      common_info_study_section[:project_title] = Project.find(@p_id).title
-      common_info_study_section[:ef_title] = ExtractionForm.find(@ef_id).title
-      common_info_study_section[:section] = section.to_s
       common_info_study_section[:pp_title] = pp.title
       common_info_study_section[:pp_author] = pp.author
       common_info_study_section[:pp_country] = pp.country
@@ -512,7 +731,6 @@ class Exporter  #{{{1
       common_info_study_section[:pp_trial_title] = pp.trial_title
       common_info_study_section[:ppn_identifier_type] = ppn.number_type
       common_info_study_section[:ppn_identifier] = ppn.number
-      common_info_study_section[:study_id] = study_id
     end
 
     @common_info[study_id][section] = common_info_study_section
@@ -543,7 +761,42 @@ class Exporter  #{{{1
     end
   end
 
-  def _section_detail_info(params) #(study_id, arm_id, outcome_id, section, section_detail)  #{{{2
+  def _diagnostic_test_detail_info(params)  #{{{2
+    study_id = params[:study_id]
+    diagnostic_test_id = params[:diagnostic_test_id]
+    section = params[:section]
+    section_detail = params[:diagnostic_test_detail]
+
+    case section_detail.field_type
+    when /text/
+      _text_question_dt({ :study_id => study_id,
+                          :diagnostic_test_id => diagnostic_test_id,
+                          :section => section,
+                          :section_detail => section_detail })
+    when /matrix_radio/
+      _matrix_radio_question_dt({ :study_id => study_id,
+                                  :diagnostic_test_id => diagnostic_test_id,
+                                  :section => section,
+                                  :section_detail => section_detail })
+    when /matrix_checkbox/
+      _matrix_checkbox_question_dt({ :study_id => study_id,
+                                     :diagnostic_test_id => diagnostic_test_id,
+                                     :section => section,
+                                     :section_detail => section_detail })
+    when /matrix_select/
+      _matrix_select_question_dt({ :study_id => study_id,
+                                   :diagnostic_test_id => diagnostic_test_id,
+                                   :section => section,
+                                   :section_detail => section_detail })
+    else # select, radio, checkbox
+      _single_column_answer_question_dt({ :study_id => study_id,
+                                          :diagnostic_test_id => diagnostic_test_id,
+                                          :section => section,
+                                          :section_detail => section_detail })
+    end
+  end
+
+  def _section_detail_info(params)  #{{{2
     study_id = params[:study_id]
     arm_id = params[:arm_id].blank? ? 0 : params[:arm_id]
     outcome_id = params[:outcome_id].blank? ? 0 : params[:outcome_id]
@@ -584,7 +837,7 @@ class Exporter  #{{{1
     end
   end
 
-  def _matrix_radio_question(params) #(study_id, arm_id, outcome_id, section, section_detail)  #{{{2
+  def _matrix_radio_question(params)  #{{{2
     study_id = params[:study_id]
     arm_id = params[:arm_id].blank? ? 0 : params[:arm_id]
     outcome_id = params[:outcome_id].blank? ? 0 : params[:outcome_id]
@@ -673,7 +926,89 @@ class Exporter  #{{{1
     end
   end
 
-  def _build_data_array(params) #(section, section_detail, arm_id, outcome_id, sddp, sddp_id, row=nil, col=nil, selected)  #{{{2
+  def _matrix_radio_question_dt(params)  #{{{2
+    study_id = params[:study_id]
+    diagnostic_test_id = params[:diagnostic_test_id]
+    section = params[:section]
+    section_detail = params[:section_detail]
+
+    rows = "#{section.to_s}Field".constantize.find(:all,
+            :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail.id,
+                             :column_number                         => 0 })
+    cols = "#{section.to_s}Field".constantize.find(:all,
+            :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail.id,
+                             :row_number                            => 0 })
+
+    rows.each do |r|
+      # row_number of -1 means this is an "Other (please specify)" option
+      if r.row_number==-1
+        sddp = "#{section.to_s}DataPoint".constantize.find(:first,
+                :conditions => { "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                 :study_id                                    => study_id,
+                                 :extraction_form_id                          => @ef_id,
+                                 :diagnostic_test_id                          => diagnostic_test_id,
+                                 :row_field_id                                => r.id })
+        if sddp.blank?
+          sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                            :study_id                                    => study_id,
+                                                            :extraction_form_id                          => @ef_id,
+                                                            :row_field_id                                => r.id,
+                                                            :column_field_id                             => 0,
+                                                            :diagnostic_test_id                          => diagnostic_test_id)
+          sddp_id = ""
+          selected = ""
+        else
+          sddp_id = sddp.id
+          selected = sddp.value.blank? ? "" : "Y"
+        end
+  
+        data = _build_data_array_dt({ :section => section,
+                                      :section_detail => section_detail,
+                                      :diagnostic_test_id => diagnostic_test_id,
+                                      :sddp => sddp,
+                                      :sddp_id => sddp_id,
+                                      :row => r,
+                                      :selected => selected })
+        _write_to_csv(study_id, section, data)
+      else
+        cols.each do |c|
+          sddp = "#{section.to_s}DataPoint".constantize.find(:first,
+                  :conditions => { "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                   :value                                       => c.option_text,
+                                   :study_id                                    => study_id,
+                                   :extraction_form_id                          => @ef_id,
+                                   :row_field_id                                => r.id,
+                                   :diagnostic_test_id                          => diagnostic_test_id })
+          if sddp.blank?
+            sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                              :value                                       => c.option_text,
+                                                              :study_id                                    => study_id,
+                                                              :extraction_form_id                          => @ef_id,
+                                                              :row_field_id                                => r.id,
+                                                              :column_field_id                             => 0,
+                                                              :diagnostic_test_id                          => diagnostic_test_id)
+            sddp_id = ""
+            selected = ""
+          else
+            sddp_id = sddp.id
+            selected = sddp.value.blank? ? "" : "Y"
+          end
+
+          data = _build_data_array_dt({ :section => section,
+                                        :section_detail => section_detail,
+                                        :diagnostic_test_id => diagnostic_test_id,
+                                        :sddp => sddp,
+                                        :sddp_id => sddp_id,
+                                        :row => r,
+                                        :col => c,
+                                        :selected => selected })
+          _write_to_csv(study_id, section, data)
+        end
+      end
+    end
+  end
+
+  def _build_data_array(params)  #{{{2
     section = params[:section]
     section_detail = params[:section_detail]
     arm_id = params[:arm_id].blank? ? 0 : params[:arm_id]
@@ -718,7 +1053,43 @@ class Exporter  #{{{1
      sddp_id]
   end
 
-  def _matrix_checkbox_question(params) #(study_id, arm_id, outcome_id, section, section_detail)  #{{{2
+  def _build_data_array_dt(params)  #{{{2
+    section = params[:section]
+    section_detail = params[:section_detail]
+    diagnostic_test_id = params[:diagnostic_test_id]
+    sddp = params[:sddp]
+    sddp_id = params[:sddp_id].blank? ? "" : params[:sddp_id]
+    row = params[:row]
+    col = params[:col]
+    selected = params[:selected]
+
+    question_type = section_detail.field_type.blank? ? "" : section_detail.field_type.strip
+  
+    diagnostic_test = DiagnosticTest.find(:first, :conditions => { :id => diagnostic_test_id })
+    diagnostic_test_title = diagnostic_test.blank? ? "" : diagnostic_test.title.strip
+  
+    question = section_detail.question.blank? ? "" : section_detail.question.strip
+    row_option_text = row.option_text.blank? ? "" : row.option_text.strip unless row.nil?
+    col_option_text = col.option_text.blank? ? "" : col.option_text.strip unless col.nil?
+    value = sddp.value.blank? ? "" : sddp.value.strip
+    notes = sddp.notes.blank? ? "" : sddp.notes.strip
+    subquestion = row.subquestion.blank? ? "" : row.subquestion.strip
+    subquestion_value = sddp.subquestion_value.blank? ? "" : sddp.subquestion_value.strip
+  
+    [question_type,
+     diagnostic_test_title,
+     question,
+     row_option_text,
+     col_option_text,
+     value,
+     selected,
+     notes,
+     subquestion,
+     subquestion_value,
+     sddp_id]
+  end
+
+  def _matrix_checkbox_question(params)  #{{{2
     study_id = params[:study_id]
     arm_id = params[:arm_id].blank? ? 0 : params[:arm_id]
     outcome_id = params[:outcome_id].blank? ? 0 : params[:outcome_id]
@@ -785,6 +1156,67 @@ class Exporter  #{{{1
     end
   end
 
+  def _matrix_checkbox_question_dt(params)  #{{{2
+    study_id = params[:study_id]
+    diagnostic_test_id = params[:diagnostic_test_id]
+    section = params[:section]
+    section_detail = params[:section_detail]
+
+    rows = "#{section.to_s}Field".constantize.find(:all,
+            :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail.id,
+                             :column_number                         => 0 })
+    cols = "#{section.to_s}Field".constantize.find(:all,
+            :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail.id,
+                             :row_number                            => 0 })
+    rows.each do |r|
+      # row_number of -1 means this is an "Other (please specify)" option
+      if r.row_number==-1
+        sddp = "#{section.to_s}DataPoint".constantize.find(:first,
+                :conditions => { "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                 :study_id                                    => study_id,
+                                 :extraction_form_id                          => @ef_id,
+                                 :diagnostic_test_id                          => diagnostic_test_id,
+                                 :row_field_id                                => r.id })
+        if sddp.blank?
+          sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                            :study_id                                    => study_id,
+                                                            :extraction_form_id                          => @ef_id,
+                                                            :row_field_id                                => r.id,
+                                                            :column_field_id                             => 0,
+                                                            :diagnostic_test_id                          => diagnostic_test_id)
+          sddp_id = ""
+          selected = ""
+        else
+          sddp_id = sddp.id
+          selected = sddp.value.blank? ? "" : "Y"
+        end
+  
+        data = _build_data_array_dt({ :section => section,
+                                      :section_detail => section_detail,
+                                      :diagnostic_test_id => diagnostic_test_id,
+                                      :sddp => sddp,
+                                      :sddp_id => sddp_id,
+                                      :row => r,
+                                      :selected => selected })
+        _write_to_csv(study_id, section, data)
+      else
+        cols.each do |c|
+          sddp, sddp_id, selected = _find_matrix_checkbox_sddp_dt({section: section, section_detail: section_detail,
+                                            study_id: study_id, row_field: r, col_field: c, diagnostic_test_id: diagnostic_test_id })
+          data = _build_data_array_dt({ :section => section,
+                                        :section_detail => section_detail,
+                                        :diagnostic_test_id => diagnostic_test_id,
+                                        :sddp => sddp,
+                                        :sddp_id => sddp_id,
+                                        :row => r,
+                                        :col => c,
+                                        :selected => selected })
+          _write_to_csv(study_id, section, data)
+        end
+      end
+    end
+  end
+
   def _find_matrix_checkbox_sddp(params)  #{{{2
     section = params[:section]
     section_detail = params[:section_detail]
@@ -812,6 +1244,40 @@ class Exporter  #{{{1
                                                         :column_field_id                             => 0,
                                                         :arm_id                                      => arm_id,
                                                         :outcome_id                                  => outcome_id)
+      sddp_id = ""
+      selected = ""
+    else
+      sddp_id = sddp.id
+      selected = "Y"
+    end
+
+    return sddp, sddp_id, selected
+  end
+
+  def _find_matrix_checkbox_sddp_dt(params)  #{{{2
+    section = params[:section]
+    section_detail = params[:section_detail]
+    study_id = params[:study_id]
+    row_field = params[:row_field].blank? ? 0 : params[:row_field]
+    col_field = params[:col_field].blank? ? 0 : params[:col_field]
+    diagnostic_test_id = params[:diagnostic_test_id]
+
+    sddp = "#{section.to_s}DataPoint".constantize.find(:first,
+            :conditions => { "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                             :value                                       => col_field.option_text,
+                             :study_id                                    => study_id,
+                             :extraction_form_id                          => @ef_id,
+                             :row_field_id                                => row_field.id,
+                             :column_field_id                             => 0,
+                             :diagnostic_test_id                          => diagnostic_test_id })
+    if sddp.blank?
+      sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                        :value                                       => col_field.option_text,
+                                                        :study_id                                    => study_id,
+                                                        :extraction_form_id                          => @ef_id,
+                                                        :row_field_id                                => row_field.id,
+                                                        :column_field_id                             => 0,
+                                                        :diagnostic_test_id                          => diagnostic_test_id)
       sddp_id = ""
       selected = ""
     else
@@ -910,6 +1376,95 @@ class Exporter  #{{{1
                                        :row => r,
                                        :col => c,
                                        :selected => selected })
+            _write_to_csv(study_id, section, data)
+          end
+        end
+      end
+    end
+  end
+
+  def _matrix_select_question_dt(params)  #{{{2
+    study_id = params[:study_id]
+    diagnostic_test_id = params[:diagnostic_test_id]
+    section = params[:section]
+    section_detail = params[:section_detail]
+
+    rows = "#{section.to_s}Field".constantize.find(:all,
+            :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail.id,
+                             :column_number                         => 0 })
+    cols = "#{section.to_s}Field".constantize.find(:all,
+            :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail.id,
+                             :row_number                            => 0 })
+
+    rows.each do |r|
+      # row_number of -1 means this is an "Other (please specify)" option
+      if r.row_number==-1
+        sddp = "#{section.to_s}DataPoint".constantize.find(:first,
+                :conditions => { "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                 :study_id                                    => study_id,
+                                 :extraction_form_id                          => @ef_id,
+                                 :diagnostic_test_id                          => diagnostic_test_id,
+                                 :row_field_id                                => r.id })
+        if sddp.blank?
+          sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                            :study_id                                    => study_id,
+                                                            :extraction_form_id                          => @ef_id,
+                                                            :row_field_id                                => r.id,
+                                                            :column_field_id                             => 0,
+                                                            :diagnostic_test_id                          => diagnostic_test_id)
+          sddp_id = ""
+          selected = ""
+        else
+          sddp_id = sddp.id
+          selected = sddp.value.blank? ? "" : "Y"
+        end
+  
+        data = _build_data_array_dt({ :section => section,
+                                      :section_detail => section_detail,
+                                      :diagnostic_test_id => diagnostic_test_id,
+                                      :sddp => sddp,
+                                      :sddp_id => sddp_id,
+                                      :row => r,
+                                      :selected => selected })
+        _write_to_csv(study_id, section, data)
+      else
+        cols.each do |c|
+          lof_matrix_dropdown_option_values = _get_lof_matrix_dropdown_option_values({ section: section.to_s, row_id: r.id, col_id: c.id })
+          if lof_matrix_dropdown_option_values.length>0
+            if section_detail.include_other_as_option
+              lof_matrix_dropdown_option_values.push "Other..." 
+            end
+
+            # do this the other way around. Find all the answer that are already in the system and compare to 
+            # options that were given. remove it from the array once we print one out.
+            lof_matrix_dropdown_option_values.each do |v|
+              sddp, sddp_id, selected = _find_matrix_select_sddp_dt({section: section, section_detail: section_detail, study_id: study_id,
+                                                    row_field: r, col_field: c, diagnostic_test_id: diagnostic_test_id,
+                                                    value: v, lof_matrix_dropdown_option_values: lof_matrix_dropdown_option_values })
+              data = _build_data_array_dt({ :section => section,
+                                            :section_detail => section_detail,
+                                            :diagnostic_test_id => diagnostic_test_id,
+                                            :sddp => sddp,
+                                            :sddp_id => sddp_id,
+                                            :row => r,
+                                            :col => c,
+                                            :selected => selected })
+              _write_to_csv(study_id, section, data)
+            end
+
+          # This must be a text box
+          else
+            sddp, sddp_id, selected = _find_matrix_select_sddp_dt({section: section, section_detail: section_detail, study_id: study_id,
+                                                  row_field: r, col_field: c, diagnostic_test_id: diagnostic_test_id,
+                                                  value: nil })
+            data = _build_data_array_dt({ :section => section,
+                                          :section_detail => section_detail,
+                                          :diagnostic_test_id => diagnostic_test_id,
+                                          :sddp => sddp,
+                                          :sddp_id => sddp_id,
+                                          :row => r,
+                                          :col => c,
+                                          :selected => selected })
             _write_to_csv(study_id, section, data)
           end
         end
@@ -1031,6 +1586,112 @@ class Exporter  #{{{1
     return sddp, sddp_id, selected
   end
 
+  def _find_matrix_select_sddp_dt(params)  #{{{2
+    section = params[:section]
+    section_detail = params[:section_detail]
+    study_id = params[:study_id]
+    row_field = params[:row_field].blank? ? 0 : params[:row_field]
+    col_field = params[:col_field].blank? ? 0 : params[:col_field]
+    diagnostic_test_id = params[:diagnostic_test_id]
+    value = params[:value].include?("Other...") ? "" : params[:value] unless params[:value].nil?
+
+    if params[:value].nil?
+      sddp = "#{section.to_s}DataPoint".constantize.find(:first,
+              :conditions => { "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                               :study_id                                    => study_id,
+                               :extraction_form_id                          => @ef_id,
+                               :row_field_id                                => row_field.id,
+                               :column_field_id                             => col_field.id,
+                               :diagnostic_test_id                          => diagnostic_test_id })
+      if sddp.blank?
+        sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                          :study_id                                    => study_id,
+                                                          :extraction_form_id                          => @ef_id,
+                                                          :row_field_id                                => row_field.id,
+                                                          :column_field_id                             => col_field.id,
+                                                          :diagnostic_test_id                          => diagnostic_test_id)
+        sddp_id = ""
+        selected = ""
+      else
+        sddp_id = sddp.id
+        selected = sddp.value.blank? ? "" : "Y"
+      end
+
+      return sddp, sddp_id, selected
+    end
+
+    if params[:value].include?("Other...")
+      lof_matrix_dropdown_option_values = params[:lof_matrix_dropdown_option_values]
+      sddps = "#{section.to_s}DataPoint".constantize.find(:all,
+               :conditions => { "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                :study_id                                    => study_id,
+                                :extraction_form_id                          => @ef_id,
+                                :row_field_id                                => row_field.id,
+                                :column_field_id                             => col_field.id,
+                                :diagnostic_test_id                          => diagnostic_test_id })
+      if sddps.blank?
+        sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                          :value                                       => value,
+                                                          :study_id                                    => study_id,
+                                                          :extraction_form_id                          => @ef_id,
+                                                          :row_field_id                                => row_field.id,
+                                                          :column_field_id                             => col_field.id,
+                                                          :diagnostic_test_id                          => diagnostic_test_id)
+        sddp_id = ""
+        selected = ""
+        return sddp, sddp_id, selected
+      else
+        sddps.each do |dp|
+          unless lof_matrix_dropdown_option_values.include?(dp.value)
+            sddp = dp
+          end
+
+          if sddp.nil?
+            sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                              :value                                       => value,
+                                                              :study_id                                    => study_id,
+                                                              :extraction_form_id                          => @ef_id,
+                                                              :row_field_id                                => row_field.id,
+                                                              :column_field_id                             => col_field.id,
+                                                              :diagnostic_test_id                          => diagnostic_test_id)
+            sddp_id = ""
+            selected = ""
+          else
+            sddp_id = dp.id
+            selected = "Y"
+          end
+
+          return sddp, sddp_id, selected
+        end
+      end
+    else
+      sddp = "#{section.to_s}DataPoint".constantize.find(:first,
+              :conditions => { "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                               :value                                       => value,
+                               :study_id                                    => study_id,
+                               :extraction_form_id                          => @ef_id,
+                               :row_field_id                                => row_field.id,
+                               :column_field_id                             => col_field.id,
+                               :diagnostic_test_id                          => diagnostic_test_id })
+      if sddp.blank?
+        sddp = "#{section.to_s}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                                                          :value                                       => value,
+                                                          :study_id                                    => study_id,
+                                                          :extraction_form_id                          => @ef_id,
+                                                          :row_field_id                                => row_field.id,
+                                                          :column_field_id                             => col_field.id,
+                                                          :diagnostic_test_id                          => diagnostic_test_id)
+        sddp_id = ""
+        selected = ""
+      else
+        sddp_id = sddp.id
+        selected = sddp.value.blank? ? "" : "Y"
+      end
+    end
+
+    return sddp, sddp_id, selected
+  end
+
   def _get_lof_matrix_dropdown_option_values(params)  #{{{2
     lof_matrix_dropdown_option_values = Array.new
     options = MatrixDropdownOption.find(:all, :conditions => { :row_id     => params[:row_id],
@@ -1043,7 +1704,7 @@ class Exporter  #{{{1
     return lof_matrix_dropdown_option_values
   end
 
-  def _single_column_answer_question(params) #(study_id, arm_id, outcome_id, section, section_detail)  #{{{2
+  def _single_column_answer_question(params)  #{{{2
     study_id = params[:study_id]
     arm_id = params[:arm_id].blank? ? 0 : params[:arm_id]
     outcome_id = params[:outcome_id].blank? ? 0 : params[:outcome_id]
@@ -1112,7 +1773,65 @@ class Exporter  #{{{1
     end
   end
 
-  def _text_question(params) #(study_id, arm_id, outcome_id, section, section_detail)  #{{{2
+  def _single_column_answer_question_dt(params)  #{{{2
+    study_id = params[:study_id]
+    diagnostic_test_id = params[:diagnostic_test_id]
+    section = params[:section]
+    section_detail = params[:section_detail]
+
+    section_fields = "#{section.to_s}Field".constantize.find(:all,
+            :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail.id })
+    section_fields.each do |sf|
+      sddp = "#{section}DataPoint".constantize.find(:first, :conditions => {
+              "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+               :value                                      => sf.option_text,
+               :study_id                                   => study_id,
+               :extraction_form_id                         => @ef_id,
+               :row_field_id                               => 0,
+               :column_field_id                            => 0,
+               :diagnostic_test_id                         => diagnostic_test_id })
+      if sddp.blank?
+        sddp = "#{section}DataPoint".constantize.new( "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+                 :study_id                                   => study_id,
+                 :extraction_form_id                         => @ef_id,
+                 :row_field_id                               => 0,
+                 :column_field_id                            => 0,
+                 :diagnostic_test_id                         => diagnostic_test_id )
+        sddp_id = ""
+        selected = ""
+      else
+        sddp_id = sddp.id
+        selected = sddp.value.blank? ? "" : "Y"
+      end
+
+      # Let's do some house cleaning before exporting to csv
+      question_type = section_detail.field_type.blank? ? "" : section_detail.field_type.strip
+
+      diagnostic_test = DiagnosticTest.find(:first, :conditions => { :id => diagnostic_test_id })
+      diagnostic_test_title = diagnostic_test.title
+
+      question = section_detail.question.blank? ? "" : section_detail.question.strip
+      value = sddp.value.blank? ? sf.option_text : sddp.value.strip
+      notes = sddp.notes.blank? ? "" : sddp.notes.strip
+      subquestion = sf.subquestion.blank? ? "" : sf.subquestion.strip
+      subquestion_value = sddp.subquestion_value.blank? ? "" : sddp.subquestion_value.strip
+
+      data = [question_type,
+              diagnostic_test_title,
+              question,
+              "",
+              "",
+              value,
+              selected,
+              notes,
+              subquestion,
+              subquestion_value,
+              sddp_id]
+      _write_to_csv(study_id, section, data)
+    end
+  end
+
+  def _text_question(params)  #{{{2
     study_id = params[:study_id]
     arm_id = params[:arm_id].blank? ? 0 : params[:arm_id]
     outcome_id = params[:outcome_id].blank? ? 0 : params[:outcome_id]
@@ -1171,6 +1890,55 @@ class Exporter  #{{{1
     _write_to_csv(study_id, section, data)
   end
 
+  def _text_question_dt(params)  #{{{2
+    study_id = params[:study_id]
+    diagnostic_test_id = params[:diagnostic_test_id]
+    section = params[:section]
+    section_detail = params[:section_detail]
+
+    # The fields table isn't used for text questions.
+    sddp = "#{section}DataPoint".constantize.find(:first, :conditions => { 
+            "#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+             :study_id                                   => study_id,
+             :extraction_form_id                         => @ef_id,
+             :diagnostic_test_detail_field_id            => section_detail.id,
+             :diagnostic_test_id                         => diagnostic_test_id })
+    if sddp.blank?
+      sddp = "#{section}DataPoint".constantize.new("#{section.to_s.underscore}_field_id".to_sym => section_detail.id,
+              :study_id                                                                         => study_id,
+              :extraction_form_id                                                               => @ef_id,
+              :diagnostic_test_id                                                               => diagnostic_test_id )
+      sddp_id = ""
+      selected = ""
+    else
+      sddp_id = sddp.id
+      selected = sddp.value.blank? ? "" : "Y"
+    end
+
+    # Let's do some house cleaning before exporting to csv
+    question_type = section_detail.field_type.blank? ? "" : section_detail.field_type.strip
+
+    diagnostic_test = DiagnosticTest.find(:first, :conditions => { :id => diagnostic_test_id })
+    diagnostic_test_title = diagnostic_test.blank? ? "" : diagnostic_test.title.strip
+
+    question = section_detail.question.blank? ? "" : section_detail.question.strip
+    value = sddp.value.blank? ? "" : sddp.value.strip
+    notes = sddp.notes.blank? ? "" : sddp.notes.strip
+
+    data = [question_type,
+            diagnostic_test_title,
+            question,
+            "",
+            "",
+            value,
+            selected,
+            notes,
+            "",
+            "",
+            sddp_id]
+    _write_to_csv(study_id, section, data)
+  end
+
   def _get_lof_section_details(section)  #{{{2
     "#{section.to_s}".constantize.find(:all, :conditions => { :extraction_form_id => @ef_id })
   end
@@ -1212,11 +1980,29 @@ class Exporter  #{{{1
                                            'Follow-up Value',
                                            'Data Point ID'
                                           ],
-               :DiagnosticTest         => [],
-               :DiagnosticTestDetail   => [],
+               :DiagnosticTest         => ['Diagnostic Test',
+                                           'Diagnostic Test Type',
+                                           'Diagnostic Test Description',
+                                           'Diagnostic Test Notes',
+                                           'Selected? (Y=Yes, *Blank*=No)',
+                                           'Is suggested by lead? (Y=Yes, *Blank*=No)',
+                                           'Diagnostic Test Threshold',
+                                          ],
+               :DiagnosticTestDetail   => ['Question Type',
+                                           'Diagnostic Test Title',
+                                           'Question',
+                                           'Row Option Text',
+                                           'Col Option Text',
+                                           'Value',
+                                           'Selected? (Y=Yes, *Blank*=No)',
+                                           'Notes',
+                                           'Follow-up Question',
+                                           'Follow-up Value',
+                                           'Data Point ID'
+                                          ],
                :Arm                    => ['Arm Title',
                                            'Selected? (Y=Yes, *Blank*=No)',
-                                           'Is suggested by lead? (Y=Yes, *Blank*=No',
+                                           'Is suggested by lead? (Y=Yes, *Blank*=No)',
                                           ],
                :ArmDetail              => ['Question Type',
                                            'Arm Title',
@@ -1244,7 +2030,21 @@ class Exporter  #{{{1
                                            'Follow-up Value',
                                            'Data Point ID'
                                           ],
-               :Outcome                => [],
+               :Outcome                => ['Outcome Title',
+                                           'Outcome Description',
+                                           'Outcome Type',
+                                           'Outcome Selected? (Y=Yes, *Blank*=No)',
+                                           'Is suggested by lead? (Y=Yes, *Blank*=No)',
+                                           'Population',
+                                           'Population Selected? (Y=Yes, *Blank*=No)',
+                                           'Population Description',
+                                           'Timepoint',
+                                           'Time Unit',
+                                           'Timepoint Selected? (Y=Yes, *Blank*=No)',
+                                           'Outcome ID',
+                                           'Subgroup ID',
+                                           'Timepoint ID',
+                                          ],
                :OutcomeDetail          => ['Question Type',
                                            'Arm Title',
                                            'Outcome Title',
