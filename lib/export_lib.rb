@@ -1,6 +1,3 @@
-#### NEED TO REMOVE ALL NAMED ARGUMENTS. DOESN'T WORK
-
-
 # encoding: UTF-8
 
 require 'fileutils'
@@ -34,15 +31,6 @@ class Exporter  #{{{1
 
   def get_extraction_form_id  #{{{2
     @ef_id
-  end
-
-  def build_arm_csv  #{{{2
-  end
-
-  def build_outcome_csv  #{{{2
-  end
-
-  def build_details_csv  #{{{2
   end
 
   # We get the list of study ids by their association to the extraction form
@@ -153,7 +141,6 @@ class Exporter  #{{{1
                                   :diagnostic_tests => lof_diagnostic_tests,
                                   :suggested_diagnostic_tests => lof_suggested_diagnostic_tests })
     when :DiagnosticTestDetail
-      #!!!
       section_option = _get_section_option("diagnostic_test_detail")
       if section_option.by_diagnostic_test
         lof_diagnostic_tests = _get_lof_diagnostic_tests(study_id)

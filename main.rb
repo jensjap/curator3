@@ -5,16 +5,16 @@ require 'csv'
 require './lib/environment.rb'
 require './lib/trollop.rb'
 require './lib/export_lib.rb'
+require './lib/import_lib.rb'
 
 opts = Trollop::options do
   opt :project_id, "Project ID", :type => Integer
-  opt :file, "File to process", :type => String
-  opt :import, "Import data"
+  opt :import, "Import data from file", :type => String
   opt :export, "Export skeleton data"
 end
 
 def validate_arg_list(opts)
-  Trollop::die :project_id, "If you are not importing a file, then you must supply a project id" unless opts[:project_id_given] || opts[:import]
+  Trollop::die :project_id, "If you are not importing a file, then you must supply a project id" unless opts[:project_id_given] || opts[:import_given]
 end
 
 def get_lof_efs(p_id)
@@ -35,7 +35,9 @@ def main(opts)
 
   elsif opts[:import]
     puts "import mode"
-
+    puts opts[:import]
+    im = Importer.new(file_path=opts[:import])
+    im.import
   end
 end
 
