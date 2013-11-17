@@ -579,8 +579,17 @@ class Exporter  #{{{1
   end
 
   def _get_section_option(section)  #{{{2
-    EfSectionOption.find(:first, :conditions => { :extraction_form_id => @ef_id,
-                                                  :section            => section })
+    efso = EfSectionOption.find(:first, :conditions => { :extraction_form_id => @ef_id,
+                                                         :section            => section })
+    if efso.blank?
+      efso = EfSectionOption.create(:extraction_form_id => @ef_id,
+                                    :section => section,
+                                    :by_arm => 0,
+                                    :by_outcome => 0,
+                                    :by_diagnostic_test => 0)
+    end
+
+    return efso
   end
 
   def _process_key_questions(params)  #{{{2
