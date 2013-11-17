@@ -7,6 +7,7 @@ class Importer  #{{{1
   def initialize(file_path)  #{{{2
     @file_path  = file_path
     @lof_errors = Array.new
+    @affirm = ['Yes', 'yes', 'YES', 'Y', 'y']
 
     parse_data
   end
@@ -28,172 +29,325 @@ class Importer  #{{{1
     @raw_data[1..-1]
   end
 
-  def import  #{{{2
-    @data.each do |row|
-      section = row[@headers.index("Section")].to_sym
-
-      case section
-      when :KeyQuestion
-      when :Publication
-      when :DesignDetail
-        _import_section_row(row, section)
-      when :DiagnosticTest
-      when :DiagnosticTestDetail
-      when :Arm
-      when :ArmDetail
-      when :BaselineCharacteristic
-      when :Outcome
-      when :OutcomeDetail
-      when :AdverseEvent
-      when :QualityDimension
-      when :QualityRating
-      else 
-        @lof_errors << "Failure to sort section #{section}"
-      end
-    end
+  def _get_ef_id(project_id, ef_title)  #{{{2
+    ExtractionForm.find_by_title_and_project_id(ef_title, project_id).id
   end
 
-  def _import_section_row(row, section)  #{{{2
-    info_hash = _get_info_hash(row, section)
-    #!!! NEED TO CHECK FOR THIS CONDITION
-    #if info_hash[:selected]
-      _write_info_hash_to_db(section, info_hash)
-    #end
-  end
-
-  def _write_info_hash_to_db(section, info_hash)
-    dp = "#{section.to_s}DataPoint".constantize.find(:first,
-            :conditions => { "#{section.to_s.underscore}_field_id".to_sym => info_hash[:section_detail_field_id],
-                             :study_id => info_hash[:study_id],
-                             :extraction_form_id => info_hash[:ef_id],
-                             :subquestion_value => info_hash[:subquestion_value],
-                             :row_field_id => info_hash[:row_field_id],
-                             :column_field_id => info_hash[:col_field_id],
-                             :arm_id => info_hash[:arm_id],
-                             :outcome_id => info_hash[:outcome_id] })
-    if dp.blank?
-      "#{section.to_s}DataPoint".constantize.create("#{section.to_s.underscore}_field_id".to_sym => info_hash[:section_detail_field_id],
-                                                    :value => info_hash[:value],
-                                                    :notes => info_hash[:notes],
-                                                    :study_id => info_hash[:study_id],
-                                                    :extraction_form_id => info_hash[:ef_id],
-                                                    :subquestion_value => info_hash[:subquestion_value],
-                                                    :row_field_id => info_hash[:row_field_id],
-                                                    :column_field_id => info_hash[:col_field_id],
-                                                    :arm_id => info_hash[:arm_id],
-                                                    :outcome_id => info_hash[:outcome_id])
+  def _get_arm_id(study_id, title, extraction_form_id)  #{{{2
+    arm = Arm.find_by_study_id_and_title_and_extraction_form_id(study_id, title, extraction_form_id)
+    if arm.blank?
+      return 0
     else
-      dp.value = info_hash[:value]
-      dp.notes = info_hash[:notes]
-      dp.save
+      return arm.id
     end
   end
 
-  def _get_info_hash(row, section)  #{{{2
-    info_hash = Hash.new
+  def _get_arm_title(row)  #{{{2
+    begin
+      arm_title = row[@headers.index("Arm Title")]
+    rescue
+      arm_title = ""
+    end
 
-    info_hash[:project_id]              = row[@headers.index("Project ID")].to_i
-    info_hash[:ef_id]                   = _get_ef_id(row)
-    info_hash[:section]                 = section
-    info_hash[:study_id]                = row[@headers.index("Study ID")].to_i
-    info_hash[:section_detail_field_id] = _get_section_detail_id(row)
-    info_hash[:subquestion_value]       = row[@headers.index("Follow-up Value")]
-    info_hash[:value]                   = row[@headers.index("Value")]
-    info_hash[:notes]                   = row[@headers.index("Notes")]
-    info_hash[:row_field_id]            = _get_row_field_id(row)
-    info_hash[:col_field_id]            = _get_col_field_id(row)
-    info_hash[:arm_id]                  = _get_arm_id(row)
-    info_hash[:outcome_id]              = _get_outcome_id(row)
-    #info_hash[:diagnostic_test_id]      = _get_diagnostic_test_id(row)
-
-    return info_hash
+    return arm_title
   end
 
-#  def _get_diagnostic_test_id(row)  #{{{2
-#  end
-
-  def _get_outcome_id(row)  #{{{2
-    study_id = row[@headers.index("Study ID")].to_i
-    title    = row[@headers.index("Outcome Title")]
-    ef_id    = _get_ef_id(row)
-
-    outcome = Outcome.find(:first, :conditions => {
-            :study_id => study_id,
-            :title => title,
-            :extraction_form_id => ef_id })
-
-    outcome_id = outcome.nil? ? 0 : outcome.id
-    return outcome_id
+  def _get_outcome_id(study_id, title, extraction_form_id)  #{{{2
+    outcome = Outcome.find_by_study_id_and_title_and_extraction_form_id(study_id, title, extraction_form_id)
+    if outcome.blank?
+      return 0
+    else
+      return outcome.id
+    end
   end
 
-  def _get_arm_id(row)  #{{{2
-    study_id = row[@headers.index("Study ID")].to_i
-    title    = row[@headers.index("Arm Title")]
-    ef_id    = _get_ef_id(row)
+  def _get_outcome_title(row)  #{{{2
+    begin
+      outcome_title = row[@headers.index("Outcome Title")]
+    rescue
+      outcome_title = ""
+    end
 
-    arm = Arm.find(:first, :conditions => {
-            :study_id => study_id,
-            :title => title,
-            :extraction_form_id => ef_id })
-
-    arm_id = arm.nil? ? 0 : arm.id
-    return arm_id
+    return outcome_title
   end
 
-  def _get_row_field_id(row)  #{{{2
-    section_detail_id = _get_section_detail_id(row)
-    row_option_text   = row[@headers.index("Row Option Text")]
-    section  = row[@headers.index("Section")].to_sym
+  def _get_diagnostic_test_id(study_id, title, extraction_form_id)  #{{{2
+    dt = DiagnosticTest.find_by_study_id_and_title_and_extraction_form_id(study_id, title, extraction_form_id)
+    if dt.blank?
+      return 0
+    else
+      return dt.id
+    end
+  end
 
-    row_field = "#{section}Field".constantize.find(:first, :conditions => {
-            "#{section.to_s.underscore}_id".to_sym => section_detail_id,
-            :option_text => row_option_text })
+  def _get_diagnostic_test_title(row)  #{{{2
+    begin
+      dt_title = row[@headers.index("Diagnostic Test Title")]
+    rescue
+      dt_title = ""
+    end
 
-    row_field_id = row_field.nil? ? 0 : row_field.id
+    return dt_title
+  end
+
+  def _get_section_detail_field_id(section, question, ef_id, type, study_id)  #{{{2
+    "#{section.to_s}".constantize.find(:first, :conditions => { :question => question,
+                                                                :extraction_form_id => ef_id,
+                                                                :field_type => type }).id
+  end
+
+  def _get_row_field_id(section, section_detail_field_id, row_option_text)  #{{{2
+    begin
+      row_field_id = "#{section.to_s}Field".constantize.find(:first, :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail_field_id,
+                                                                                      :option_text => row_option_text,
+                                                                                      :column_number => 0 }).id
+    rescue
+      row_field_id = 0
+    end
+
     return row_field_id
   end
 
-  def _get_col_field_id(row)  #{{{2
-    section_detail_id = _get_section_detail_id(row)
-    col_option_text = row[@headers.index("Col Option Text")]
-    section  = row[@headers.index("Section")].to_sym
+  def _get_col_field_id(section, section_etail_field_id, col_option_text)  #{{{2
+    begin
+      col_field_id = "#{section.to_s}Field".constantize.find(:first, :conditions => { "#{section.to_s.underscore}_id".to_sym => section_detail_field_id,
+                                                                                      :option_text => col_option_text,
+                                                                                      :row_number => 0 }).id
+    rescue
+      col_field_id = 0
+    end
 
-    col_field = "#{section}Field".constantize.find(:first, :conditions => {
-            "#{section.to_s.underscore}_id".to_sym => section_detail_id,
-            :option_text => col_option_text })
-
-    col_field_id = col_field.nil? ? 0 : col_field.id
     return col_field_id
   end
 
-  def _get_ef_id(row)  #{{{2
-    project_id = row[@headers.index("Project ID")].to_i
-    ef_title   = row[@headers.index("EF Title")]
+  def import  #{{{2
+    @data.each do |row|
+      selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+      if @affirm.include? selected
+        project_id              = row[@headers.index("Project ID")].to_i
+        project_title           = row[@headers.index("Project Title")]
+        ef_title                = row[@headers.index("EF Title")]
+        ef_id                   = _get_ef_id(project_id, ef_title)
+        section                 = row[@headers.index("Section")]
+        study_id                = row[@headers.index("Study ID")].to_i
+        type                    = row[@headers.index("Question Type")]
+  
+        arm_title               = _get_arm_title(row)
+        if arm_title.blank?
+          arm_id                = 0
+        else
+          arm_id                = _get_arm_id(study_id, arm_title, ef_id)
+        end
+  
+        outcome_title           = _get_outcome_title(row)
+        if outcome_title.blank?
+          outcome_id            = 0
+        else
+          outcome_id            = _get_outcome_id(study_id, outcome_title, ef_id)
+        end
+  
+        diagnostic_test_title   = _get_diagnostic_test_title(row)
+        if diagnostic_test_title.blank?
+          diagnostic_test_id    = 0
+        else
+          diagnostic_test_id    = _get_diagnostic_test_id(study_id, diagnostic_test_title, ef_id)
+        end
+  
+        question                = row[@headers.index("Question")]
+        section_detail_field_id = _get_section_detail_field_id(section, question, ef_id, type, study_id)
+        value                   = row[@headers.index("Value")]
+        selected                = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+        notes                   = row[@headers.index("Notes")]
+        subquestion_value       = row[@headers.index("Follow-up Value")]
+        row_option_text         = row[@headers.index("Row Option Text")]
+        row_field_id            = _get_row_field_id(section, section_detail_field_id, row_option_text)
+        col_option_text         = row[@headers.index("Col Option Text")]
+        column_field_id         = _get_col_field_id(section, section_detail_field_id, col_option_text)
+        datapoint_id            = row[@headers.index("Data Point ID")].to_i
+  
+        datapoint_info = Hash.new
+        datapoint_info[:section_detail_field_id] = section_detail_field_id
+        datapoint_info[:value] = value
+        datapoint_info[:notes] = notes
+        datapoint_info[:study_id] = study_id
+        datapoint_info[:extraction_form_id] = ef_id
+        datapoint_info[:subquestion_value] = subquestion_value
+        datapoint_info[:row_field_id] = row_field_id
+        datapoint_info[:column_field_id] = column_field_id
+        datapoint_info[:arm_id] = arm_id
+        datapoint_info[:outcome_id] = outcome_id
+        datapoint_info[:diagnostic_test_id] = diagnostic_test_id
+        datapoint_info[:datapoint_id] = datapoint_id
 
-    ef_id = ExtractionForm.find_by_project_id_and_title(project_id, ef_title).id
+        update_db(section, datapoint_info)
+      end
 
-    if ef_id.class != Fixnum
-      puts "Too many ef ids found with ef id: #{ef_id}"
-      @lof_errors << "Too many ef ids found with ef id: #{ef_id}"
-      gets
+#      case type
+#      when "text"
+#        _import_text(ef_id, section, row)
+#      when "select"
+#        _import_select(ef_id, section, row)
+#      when "radio"
+#        _import_radio(ef_id, section, row)
+#      when "checkbox"
+#        _import_checkbox(ef_id, section, row)
+#      when "matrix_radio"
+#        _import_matrix_radio(ef_id, section, row)
+#      when "matrix_checkbox"
+#        _import_matrix_checkbox(ef_id, section, row)
+#      when "matrix_select"
+#        _import_matrix_select(ef_id, section, row)
+#      else
+#        @lof_errors << "Failure to sort question type: #{type}"
+#      end
     end
-
-    return ef_id
   end
 
-  def _get_section_detail_id(row)  #{{{2
-    ef_id    = _get_ef_id(row)
-    section  = row[@headers.index("Section")].to_sym
-    question = row[@headers.index("Question")]
-
-    section_detail_id = "#{section.to_s}".constantize.find_by_extraction_form_id_and_question(ef_id, question).id
-
-    if section_detail_id.class != Fixnum
-      puts "Too many section detail ids found for question id: #{question}"
-      @lof_errors << "Too many section detail ids found for question id: #{question}"
-      gets
+  def update_db(section, dp)  #{{{2
+    if dp[:datapoint_id]==0
+      # Try to find the datapoint first and then update. If it cannot be found then just create
+      if dp[:section]==:DiagnosticTest
+        #!!!
+      else
+        datapoint = "#{section.to_s}DataPoint".constantize.find(:first, :conditions => {
+                "#{section.to_s.underscore}_field_id".to_sym => dp[:section_detail_field_id],
+                :study_id                                    => dp[:study_id],
+                :extraction_form_id                          => dp[:extraction_form_id],
+                :row_field_id                                => dp[:row_field_id],
+                :column_field_id                             => dp[:column_field_id],
+                :arm_id                                      => dp[:arm_id],
+                :outcome_id                                  => dp[:outcome_id] })
+        if datapoint.blank?
+          datapoint = "#{section.to_s}DataPoint".constantize.create(
+                  "#{section.to_s.underscore}_field_id".to_sym => dp[:section_detail_field_id],
+                  :value                                       => dp[:value],
+                  :notes                                       => dp[:notes],
+                  :study_id                                    => dp[:study_id],
+                  :extraction_form_id                          => dp[:extraction_form_id],
+                  :subquestion_value                           => dp[:subquestion_value],
+                  :row_field_id                                => dp[:row_field_id],
+                  :column_field_id                             => dp[:column_field_id],
+                  :arm_id                                      => dp[:arm_id],
+                  :outcome_id                                  => dp[:outcome_id] )
+        else
+          datapoint.value = dp[:value]
+          datapoint.notes = dp[:notes]
+          datapoint.subquestion_value = dp[:subquestion_value]
+          datapoint.save
+        end
+      end
+    else
+      # Update the existing value
+      datapoint = "#{section.to_s}DataPoint".constantize.find(dp[:datapoint_id])
+      datapoint.value = dp[:value]
+      datapoint.notes = dp[:notes]
+      datapoint.subquestion_value = dp[:subquestion_value]
+      datapoint.save
     end
-
-    return section_detail_id
   end
+
+  def _import_text(ef_id, section, row)  #{{{2
+    #!!!
+    dp_id = row[@headers.index("Data Point ID")].to_i
+    selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+    value = row[@headers.index("Value")]
+
+    if @affirm.include? selected
+      if dp_id==0
+        dp = _get_text_datapoint_entry(ef_id, section, row)
+        dp_id = dp.id
+      end
+
+      params = { :section => section,
+                 :datapoint_id => dp_id,
+                 :value => value }
+      _update_db(params)
+    end
+  end
+
+  def _get_text_datapoint_entry(ef_id, section, row)  #{{{2
+    section_detail_field_id = _get_section_detail_field_id(ef_id, section, row).to_i
+    study_id = row[@headers.index("Study ID")].to_i
+    extraction_form_id = ef_id
+    arm_id = _get_arm_id()
+    outcome_id
+    diagnostic_test_id
+  end
+
+  def _update_db(params)  #{{{2
+    section = params[:section]
+    datapoint_id = params[:datapoint_id]
+    value = params[:value]
+
+    dp = "#{section}DataPoint".constantize.find(datapoint_id)
+    dp.value = value
+    dp.save
+  end
+
+  def _import_select(ef_id, section, row)  #{{{2
+    #!!!
+    dp_id = row[@headers.index("Data Point ID")].to_i
+    selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+
+    if @affirm.include? selected
+      p dp_id
+      p selected
+    end
+  end
+
+  def _import_radio(ef_id, section, row)  #{{{2
+    #!!!
+    dp_id = row[@headers.index("Data Point ID")].to_i
+    selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+
+    if @affirm.include? selected
+      p dp_id
+      p selected
+    end
+  end
+
+  def _import_checkbox(ef_id, section, row)  #{{{2
+    #!!!
+    dp_id = row[@headers.index("Data Point ID")].to_i
+    selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+
+    if @affirm.include? selected
+      p dp_id
+      p selected
+    end
+  end
+
+  def _import_matrix_radio(ef_id, section, row)  #{{{2
+    #!!!
+    dp_id = row[@headers.index("Data Point ID")].to_i
+    selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+
+    if @affirm.include? selected
+      p dp_id
+      p selected
+    end
+  end
+
+  def _import_matrix_checkbox(ef_id, section, row)  #{{{2
+    #!!!
+    dp_id = row[@headers.index("Data Point ID")].to_i
+    selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+
+    if @affirm.include? selected
+      p dp_id
+      p selected
+    end
+  end
+
+  def _import_matrix_select(ef_id, section, row)  #{{{2
+    #!!!
+    dp_id = row[@headers.index("Data Point ID")].to_i
+    selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
+
+    if @affirm.include? selected
+      p dp_id
+      p selected
+    end
+  end
+
 end
