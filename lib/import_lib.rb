@@ -1,6 +1,7 @@
 # encoding: UTF-8
 
 require 'fileutils'
+require 'iconv' unless String.method_defined?(:encode)
 
 class Importer  #{{{1
 
@@ -123,14 +124,14 @@ class Importer  #{{{1
   def import  #{{{2
     @data.each do |row|
       selected = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
-      if @affirm.include? selected
+      type = row[@headers.index("Question Type")]
+      if @affirm.include?(selected) || type=='text'
         project_id              = row[@headers.index("Project ID")].to_i
         project_title           = row[@headers.index("Project Title")]
         ef_title                = row[@headers.index("EF Title")]
         ef_id                   = _get_ef_id(project_id, ef_title)
         section                 = row[@headers.index("Section")]
         study_id                = row[@headers.index("Study ID")].to_i
-        type                    = row[@headers.index("Question Type")]
   
         arm_title               = _get_arm_title(row)
         if arm_title.blank?
@@ -156,8 +157,30 @@ class Importer  #{{{1
         question                = row[@headers.index("Question")]
         section_detail_field_id = _get_section_detail_field_id(section, question, ef_id, type, study_id)
         value                   = row[@headers.index("Value")]
+        unless value.blank?
+          file_contents = value
+          if String.method_defined?(:encode)
+            file_contents.encode!('UTF-16', 'UTF-8', :invalid => :replace, :replace => '')
+            file_contents.encode!('UTF-8', 'UTF-16')
+          else
+            ic = Iconv.new('UTF-8', 'UTF-8//IGNORE')
+            file_contents = ic.iconv(file_contents)
+          end
+          value = file_contents
+        end
         selected                = row[@headers.index("Selected? (Y=Yes, *Blank*=No)")]
         notes                   = row[@headers.index("Notes")]
+        unless notes.blank?
+          file_contents = notes
+          if String.method_defined?(:encode)
+            file_contents.encode!('UTF-16', 'UTF-8', :invalid => :replace, :replace => '')
+            file_contents.encode!('UTF-8', 'UTF-16')
+          else
+            ic = Iconv.new('UTF-8', 'UTF-8//IGNORE')
+            file_contents = ic.iconv(file_contents)
+          end
+          notes = file_contents
+        end
         subquestion_value       = row[@headers.index("Follow-up Value")]
         row_option_text         = row[@headers.index("Row Option Text")]
         row_field_id            = _get_row_field_id(section, section_detail_field_id, row_option_text)
@@ -211,6 +234,7 @@ class Importer  #{{{1
       else
         datapoint = "#{section.to_s}DataPoint".constantize.find(:first, :conditions => {
                 "#{section.to_s.underscore}_field_id".to_sym => dp[:section_detail_field_id],
+                :value                                       => dp[:value],
                 :study_id                                    => dp[:study_id],
                 :extraction_form_id                          => dp[:extraction_form_id],
                 :row_field_id                                => dp[:row_field_id],
