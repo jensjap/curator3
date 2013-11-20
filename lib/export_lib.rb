@@ -306,6 +306,8 @@ class Exporter  #{{{1
       outcome_title = outcome.title
       outcome_description = outcome.description
       outcome_type = outcome.outcome_type
+      outcome_units = outcome.units
+      outcome_notes = outcome.notes
       outcome_selected = "Y"
       population_selected = "Y"
       timepoint_selected = "Y"
@@ -332,6 +334,8 @@ class Exporter  #{{{1
           data = [outcome_title,
                   outcome_description,
                   outcome_type,
+                  outcome_units,
+                  outcome_notes,
                   outcome_selected,
                   outcome_suggested_by_lead,
                   population_title,
@@ -2029,6 +2033,8 @@ class Exporter  #{{{1
                :Outcome                => ['Outcome Title',
                                            'Outcome Description',
                                            'Outcome Type',
+                                           'Outcome Units',
+                                           'Outcome Notes',
                                            'Outcome Selected? (Y=Yes, *Blank*=No)',
                                            'Is suggested by lead? (Y=Yes, *Blank*=No)',
                                            'Population',
@@ -2067,12 +2073,14 @@ class Exporter  #{{{1
                                            'Value',
                                            'Selected? (Y=Yes, *Blank*=No)',
                                            'Notes',
-                                           'Instructions'
+                                           'Instructions',
+                                           'Data Point ID'
                                           ],
                :QualityRating          => ['Quality Guideline Used',
                                            'Select Current Overall Rating',
                                            'Selected? (Y=Yes, *Blank*=No)',
-                                           'Notes on this Rating'
+                                           'Notes on this Rating',
+                                           'Data Point ID'
                                           ]}
 
     filename = "#{@p_id}_#{@ef_id}_#{section_name}.csv"
