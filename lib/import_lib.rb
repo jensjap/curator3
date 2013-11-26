@@ -34,6 +34,12 @@ class Importer  #{{{1
     ExtractionForm.find_by_title_and_project_id(ef_title, project_id).id
   end
 
+  def truncate(s, max=70, elided = ' ...')
+    s.match( /(.{1,#{max}})(?:\s|\z)/ )[1].tap do |res|
+      res << elided unless res.length == s.length
+    end    
+  end
+
   def _get_arm_id(study_id, title, extraction_form_id)  #{{{2
     arm = Arm.find_by_study_id_and_title_and_extraction_form_id(study_id, title, extraction_form_id)
     if arm.blank?
@@ -92,9 +98,12 @@ class Importer  #{{{1
   end
 
   def _get_section_detail_field_id(section, question, ef_id, type)  #{{{2
-    "#{section.to_s}".constantize.find(:first, :conditions => { :question => question,
-                                                                :extraction_form_id => ef_id,
-                                                                :field_type => type }).id
+    params = {:question => "%#{question}%", :extraction_form_id => ef_id, :field_type => type }
+    "#{section.to_s}".constantize.find(:first, :conditions => ["question LIKE :question AND extraction_form_id=:extraction_form_id AND field_type=:field_type", params]).id
+#    "#{section.to_s}".constantize.find(:first, :conditions => { :question => question,
+#                                                                :extraction_form_id => ef_id,
+#                                                                :field_type => type }).id
+#        dp = "#{info[:section]}DataPoint".constantize.find(:first, :conditions => ["#{info[:section].underscore}_field_id=:section_detail_id AND value LIKE :value AND study_id=:study_id AND extraction_form_id=:extraction_form_id AND row_field_id=:row_field_id AND column_field_id=:column_field_id AND arm_id=:arm_id AND outcome_id=:outcome_id", params])
   end
 
   def _get_row_field_id(section, section_detail_field_id, row_option_text)  #{{{2
@@ -126,6 +135,7 @@ class Importer  #{{{1
       section = row[@headers.index("Section")]
       case section
       when "Arm"
+        process_arms(row, section)
       when "Outcome"
         process_outcomes(row, section)
       when "QualityDimension"
@@ -160,6 +170,45 @@ class Importer  #{{{1
     end
   end
 
+  def process_arms(row, section)  #{{{2
+    datapoint_info = Hash.new
+    datapoint_info[:project_id] = row[@headers.index("Project ID")].to_i
+    datapoint_info[:ef_title] = _clean_string row[@headers.index("EF Title")]
+    datapoint_info[:arm_id] = row[@headers.index("Arm ID")].to_i
+    datapoint_info[:study_id] = row[@headers.index("Study ID")].to_i
+    datapoint_info[:arm_title] = _clean_string row[@headers.index("Arm Title")]
+    datapoint_info[:ef_id] = _get_ef_id(datapoint_info[:project_id], datapoint_info[:ef_title])
+
+    selected = row[@headers.index("Arm Selected? (Y=Yes, *Blank*=No)")]
+
+    if @affirm.include? selected
+      _update_db_arms(datapoint_info, section)
+    end
+  end
+
+  def _update_db_arms(datapoint_info, section)  #{{{2
+    arm_id = datapoint_info[:arm_id]
+    study_id = datapoint_info[:study_id]
+    title = "%#{datapoint_info[:arm_title]}%"
+    ef_id = datapoint_info[:ef_id]
+
+    params = { :arm_id => arm_id, :study_id => study_id, :arm_title => title, :ef_id => ef_id }
+
+    if arm_id.blank? || arm_id==0
+      arm = "#{section.to_s}".constantize.find(:first, :conditions => ["study_id=:study_id AND title LIKE :arm_title AND extraction_form_id=:ef_id", params])
+      if arm.blank?
+        "#{section.to_s}".constantize.create(:study_id => study_id, :title => datapoint_info[:arm_title], :extraction_form_id => ef_id)
+      else
+        arm.title = datapoint_info[:arm_title]
+        arm.save
+      end
+    else
+      arm = "#{section.to_s}".constantize.find(arm_id)
+      arm.title = datapoint_info[:arm_title]
+      arm.save
+    end
+  end
+
   def process_outcomes(row, section)  #{{{2
     datapoint_info = Hash.new
     datapoint_info[:project_id] = row[@headers.index("Project ID")].to_i
@@ -179,9 +228,13 @@ class Importer  #{{{1
     datapoint_info[:time_unit] = _clean_string row[@headers.index("Time Unit")]
     datapoint_info[:ef_id] = _get_ef_id(datapoint_info[:project_id], datapoint_info[:ef_title])
 
-    outcome_id = _update_db_outcomes(datapoint_info)
-    _update_db_timepoints(datapoint_info, outcome_id)
-    _update_db_subgroups(datapoint_info, outcome_id)
+    selected = row[@headers.index("Outcome Selected? (Y=Yes, *Blank*=No)")]
+
+    if @affirm.include? selected
+      outcome_id = _update_db_outcomes(datapoint_info)
+      _update_db_timepoints(datapoint_info, outcome_id)
+      _update_db_subgroups(datapoint_info, outcome_id)
+    end
   end
 
   def _clean_string(string)  #{{{2
@@ -236,9 +289,9 @@ class Importer  #{{{1
                                                          :time_unit => time_unit })
       if t.blank?
         # Create new timepoint
-        OutcomeTimepoint.create(:outcome_id => outcome_id,
-                                :number => timepoint,
-                                :time_unit => time_unit)
+        t = OutcomeTimepoint.create(:outcome_id => outcome_id,
+                                    :number => timepoint,
+                                    :time_unit => time_unit)
       end
     else
       t = OutcomeTimepoint.find(timepoint_id)
@@ -297,6 +350,7 @@ class Importer  #{{{1
     study_id                = row[@headers.index("Study ID")].to_i
     question                = row[@headers.index("Dimension")]
     section_detail_field_id = _get_quality_dimension_field_id(section, question, ef_id)
+
     value                   = row[@headers.index("Value")]
     unless value.blank?
       file_contents = value
@@ -309,6 +363,7 @@ class Importer  #{{{1
       end
       value = file_contents
     end
+ 
     notes                   = row[@headers.index("Notes")]
     unless notes.blank?
       file_contents = notes
@@ -321,7 +376,8 @@ class Importer  #{{{1
       end
       notes = file_contents
     end
-    datapoint_id            = row[@headers.index("Data Point ID")].to_i
+ 
+    datapoint_id = row[@headers.index("Data Point ID")].to_i
   
     datapoint_info = Hash.new
     datapoint_info[:section_detail_field_id] = section_detail_field_id
@@ -421,26 +477,21 @@ class Importer  #{{{1
   def update_db_quality_dimension(section, dp)  #{{{2
     if dp[:datapoint_id]==0 || dp[:datapoint_id].blank?
       # Try to find the datapoint first and then update. If it cannot be found then just create
-      if dp[:section]==:DiagnosticTest
-        #!!!
-      else
-        datapoint = "#{section.to_s}DataPoint".constantize.find(:first, :conditions => {
+      datapoint = "#{section.to_s}DataPoint".constantize.find(:first, :conditions => {
+              "#{section.to_s.underscore}_field_id".to_sym => dp[:section_detail_field_id],
+              :study_id                                    => dp[:study_id],
+              :extraction_form_id                          => dp[:extraction_form_id] })
+      if datapoint.blank?
+        datapoint = "#{section.to_s}DataPoint".constantize.create(
                 "#{section.to_s.underscore}_field_id".to_sym => dp[:section_detail_field_id],
                 :value                                       => dp[:value],
+                :notes                                       => dp[:notes],
                 :study_id                                    => dp[:study_id],
-                :extraction_form_id                          => dp[:extraction_form_id] })
-        if datapoint.blank?
-          datapoint = "#{section.to_s}DataPoint".constantize.create(
-                  "#{section.to_s.underscore}_field_id".to_sym => dp[:section_detail_field_id],
-                  :value                                       => dp[:value],
-                  :notes                                       => dp[:notes],
-                  :study_id                                    => dp[:study_id],
-                  :extraction_form_id                          => dp[:extraction_form_id])
-        else
-          datapoint.value = dp[:value]
-          datapoint.notes = dp[:notes]
-          datapoint.save
-        end
+                :extraction_form_id                          => dp[:extraction_form_id])
+      else
+        datapoint.value = dp[:value]
+        datapoint.notes = dp[:notes]
+        datapoint.save
       end
     else
       # Update the existing value

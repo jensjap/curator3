@@ -447,7 +447,7 @@ class Exporter  #{{{1
       notes = ""
       instructions = quality_dimension_field.field_notes.blank? ? "" : quality_dimension_field.field_notes.strip
     else
-      qddp_value = qddp.value.strip
+      qddp_value = qddp.value.blank? ? "" : qddp.value.strip
       selected = "Y"
       notes = qddp.notes.blank? ? "" : qddp.notes.strip
       instructions = quality_dimension_field.field_notes.blank? ? "" : quality_dimension_field.field_notes.strip
@@ -667,14 +667,14 @@ class Exporter  #{{{1
         selected = "Y"
         is_suggested_by_lead = ""
       end
-      data = [a.title, selected, is_suggested_by_lead]
+      data = [a.title, a.description, selected, is_suggested_by_lead, a.id]
       _write_to_csv(study_id, section, data)
     end
 
     lof_arm_titles_suggested.each do |arm_suggested|
       selected = ""
       is_suggested_by_lead = "Y"
-      data = [arm_suggested, selected, is_suggested_by_lead]
+      data = [arm_suggested, "", selected, is_suggested_by_lead]
       
       _write_to_csv(study_id, section, data)
     end
@@ -2001,8 +2001,10 @@ class Exporter  #{{{1
                                            'Data Point ID'
                                           ],
                :Arm                    => ['Arm Title',
-                                           'Selected? (Y=Yes, *Blank*=No)',
+                                           'Arm Description',
+                                           'Arm Selected? (Y=Yes, *Blank*=No)',
                                            'Is suggested by lead? (Y=Yes, *Blank*=No)',
+                                           'Arm ID'
                                           ],
                :ArmDetail              => ['Question Type',
                                            'Arm Title',
